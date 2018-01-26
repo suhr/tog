@@ -1,0 +1,11 @@
+[package]
+name = "tog"
+version = "0.1.0"
+authors = ["Сухарик <suhr@i2pmail.org>"]
+
+[dependencies]
+jack = "0.5.4"
+rosc = "0.1"
+
+[dependencies.miosc]
+path = "../miosc"
