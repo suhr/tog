@@ -8,6 +8,7 @@ use std::io;
 use std::net::UdpSocket;
 use std::str::FromStr;
 use std::sync::mpsc::channel;
+use std::f64::consts::PI;
 
 use jack::prelude::*;
 
@@ -18,51 +19,40 @@ trait Dsp {
 #[derive(Debug)]
 struct Oscillator {
     freq: f64,
-    time: f64,
+    phase: f64,
+    acc: f64,
+    fbuf: f64,
+    fbuf2: f64,
 }
-
-fn poly_blep(t: f64, dt: f64) -> f64 {
-    // 0 <= t < 1
-    if t < dt {
-        let t = t / dt;
-
-        t*t + 2.0 * t - 1.0
-    }
-    // -1 < t < 0
-    else if t > 1.0 - dt {
-        let t = (t - 1.0) / dt;
-
-        t*t + 2.0 * t - 1.0
-    }
-    else {
-        0.0
-    }
-}
-
-fn poly_saw(t: f64, dt: f64) -> f64 {
-    let mut t = t + 0.5;
-    if t >= 1.0 { t -= 1.0 }
-
-    let naive_saw = 2.0 * t - 1.0;
-    naive_saw - poly_blep(t, dt)
-}
-
 
 impl Dsp for Oscillator {
     fn make_noise(&mut self, buf: &mut [f32], sample_rate: f64) {
-        let dt = 1.0 / sample_rate;
-        let period = 1.0 / self.freq;
+        let period = sample_rate / self.freq;
+        let phase_inc = PI / period;
+        let m = 2.0 * (period * 0.5).floor() - 1.0;
+
+        let c = 1.0 / period;
+        let leak = 0.995;
 
         for v in buf.iter_mut() {
-            if self.time >= period {
-                self.time -= period
-            }
+            let fraq =
+                if self.phase.sin() > std::f64::EPSILON {
+                    (m * self.phase).sin()
+                    / (m * self.phase.sin())
+                }
+                else { 1.0 };
 
-            let naive = self.time * self.freq - 0.5;
-            let less_naive = naive + 0.5 * poly_blep(self.time * self.freq + 0.5, self.freq / sample_rate);
-            *v = less_naive as f32;
+            let y = (m / period) * fraq;
 
-            self.time += dt;
+            let saw = y + self.acc - c;
+            self.acc = saw * leak;
+
+            self.fbuf += 0.5 * (saw - self.fbuf);
+            self.fbuf2 += 0.6 * (self.fbuf - self.fbuf2);
+            *v = self.fbuf2 as f32;
+
+            self.phase += phase_inc;
+            if self.phase >= PI { self.phase -= PI }
         }
     }
 }
@@ -88,7 +78,10 @@ fn main() {
     let mut maybe_osc: Option<Oscillator> = None;
     Oscillator {
         freq: 440.0,
-        time: 0.0,
+        phase: 0.0,
+        acc: 0.0,
+        fbuf: 0.0,
+        fbuf2: 0.0,
     };
 
     let (tx, rx) = channel();
@@ -102,7 +95,10 @@ fn main() {
             Ok(MM::NoteOn(_, pitch, _)) => {
                 maybe_osc = Some(Oscillator {
                     freq: 440.0 * (pitch / 12.0).exp2() as f64,
-                    time: 0.0,
+                    phase: 0.0,
+                    acc: 0.0,
+                    fbuf: 0.0,
+                    fbuf2: 0.0,
                 })
             },
             Ok(MM::NoteOff(_)) => {

@@ -8,4 +8,4 @@ jack = "0.5.4"
 rosc = "0.1"
 
 [dependencies.miosc]
-path = "../miosc"
+git = "https://github.com/suhr/miosc.git"
